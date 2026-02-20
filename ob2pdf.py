@@ -7,7 +7,8 @@ import unicodedata
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
 
-# --- 1. CORE UTILITY FUNCTIONS ---
+
+# Utility functions
 
 def sanitize_title(title):
     """
@@ -16,7 +17,6 @@ def sanitize_title(title):
     """
     if title is None:
         return ""
-    
     title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('utf-8')
     title = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', title)
     title = title.replace('"', '').replace('\\', '')
@@ -31,10 +31,8 @@ def find_pdf_by_hash(start_dir, unique_key):
     """
     search_pattern = f"*{unique_key}*.pdf"
     pdf_files = list(Path(start_dir).glob(search_pattern))
-    
     if not pdf_files:
         return None
-    
     return pdf_files[0].resolve()
 
 def extract_bookmarks(xml_path, pdf_path_obj):
@@ -44,11 +42,9 @@ def extract_bookmarks(xml_path, pdf_path_obj):
     """
     XBEL_NS = 'http://www.w3.org/2002/xbel'
     NAMESPACES = {'xbel': XBEL_NS}
-
     if not Path(xml_path).exists():
         print(f"Error: Bookmarks file not found at: {xml_path}")
         return None, None
-        
     try:
         tree = ET.parse(xml_path)
         root = tree.getroot()
@@ -56,14 +52,13 @@ def extract_bookmarks(xml_path, pdf_path_obj):
         print(f"Error: Could not parse bookmarks.xml. {e}")
         return None, None
 
-    # --- AUTOMATIC HASH DETERMINATION ---
+    # Automatic hash determination
     pdf_filename = pdf_path_obj.name
     match_key_search = re.search(r'-- ([0-9a-f]{32}) --', pdf_filename)
-    
     if not match_key_search:
          print("Error: Could not extract the 32-character hash from the PDF filename.")
          return None, None
-         
+
     unique_key = match_key_search.group(1)
 
     cpdf_bookmarks = []
@@ -71,18 +66,18 @@ def extract_bookmarks(xml_path, pdf_path_obj):
 
     for bookmark in root.iter('bookmark'):
         href = bookmark.get('href')
-        
+
         if href and unique_key in href:
             title_tag = bookmark.find('title')
-            
+ 
             if title_tag is None:
                 title_tag = bookmark.find('xbel:title', NAMESPACES)
-            
+
             if title_tag is None or not title_tag.text:
                 continue
-                
+
             match = page_regex.search(href)
-            
+
             if match:
                 okular_page = int(match.group(1))
                 cpdf_page = okular_page + 1 
@@ -98,8 +93,9 @@ def extract_bookmarks(xml_path, pdf_path_obj):
         return None, None
 
     cpdf_bookmarks.sort(key=lambda x: x['Page'])
-    
+
     return cpdf_bookmarks, unique_key
+
 
 def inject_bookmarks_pypdf(pdf_path_str, bookmarks, output_path):
     """
@@ -122,8 +118,7 @@ def inject_bookmarks_pypdf(pdf_path_str, bookmarks, output_path):
 
         with open(output_path, 'wb') as f:
             writer.write(f)
-            
-        # FINAL SUCCESS MESSAGE WITH BLANK LINES
+
         num_bookmarks = len(bookmarks)
         print(f"\nSuccess! {num_bookmarks} bookmarks injected into: {output_path.name}\n")
 
@@ -132,29 +127,25 @@ def inject_bookmarks_pypdf(pdf_path_str, bookmarks, output_path):
         print("\nHint: If the PDF is heavily structured or encrypted, try cleaning it first with Ghostscript (gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=clean_input.pdf INPUT.pdf)")
         sys.exit(1)
 
-# --- 2. MAIN EXECUTION ---
 
 def find_xml_path_auto(pdf_path_obj):
     """
     Attempts to locate the bookmarks.xml file in preferred locations.
     """
     xml_filename = 'bookmarks.xml'
-    
-    # 1. Default Okular (Flatpak) location
+    # Default Okular (Flatpak) location
     default_okular_path = Path.home() / f'.var/app/org.kde.okular/data/okular/{xml_filename}'
-    
-    # 2. Current Working Directory (CWD)
+    # Current Working Directory (CWD)
     cwd_path = Path.cwd() / xml_filename
-    
-    # 3. PDF's Directory
+    # PDF's Directory
     pdf_dir_path = pdf_path_obj.parent / xml_filename
-    
+
     search_paths = [
         ("Default Okular Path", default_okular_path),
         ("Current Working Directory", cwd_path),
         ("PDF's Directory", pdf_dir_path)
     ]
-    
+
     for label, path in search_paths:
         if path.exists():
             return path.as_posix()
@@ -164,8 +155,9 @@ def find_xml_path_auto(pdf_path_obj):
     print("Checked locations:")
     for label, path in search_paths:
          print(f"  - {label}: {path.as_posix()}")
-         
+
     return None
+
 
 def main():
     if len(sys.argv) < 2 or len(sys.argv) > 3:
@@ -173,64 +165,60 @@ def main():
         print("Auto Mode: python3 ob2pdf.py <pdf_file_path>")
         print("Manual Mode: python3 ob2pdf.py <pdf_file_path> <bookmarks_xml_path>")
         sys.exit(1)
-        
+
     input_pdf_path = sys.argv[1]
-    
-    # Resolve PDF Path (Crucial for directory lookup)
+    # Check PDF Path
     try:
         temp_pdf_path_obj = Path(input_pdf_path).resolve()
     except Exception:
         print(f"ERROR: Could not process the input PDF path string: {input_pdf_path}")
         sys.exit(1)
 
-    # --- Determine XML Path ---
+    # Check XML Path
     if len(sys.argv) == 3:
-        # Manual Mode: XML path was provided
+        # Manual Mode: user provided XML path
         xml_path = sys.argv[2]
-        
     else:
-        # Auto Mode: Attempt to find XML automatically
+        # Auto Mode: attempt to find XML automatically
         xml_path = find_xml_path_auto(temp_pdf_path_obj)
-        
+
         if xml_path is None:
-            # If auto-discovery fails, prompt the user with clear instructions
             print("\nERROR: Bookmarks file (bookmarks.xml) was not found in any standard location.")
             print("Please run the script in Manual Mode and specify the path to your bookmarks file:")
             print(f"Example: python3 ob2pdf.py \"{input_pdf_path}\" /path/to/your/bookmarks.xml")
             sys.exit(1)
-        
-    # --- Check PDF Existence ---
+
+    # Check if the PDF exists
     if not temp_pdf_path_obj.exists():
         print(f"Error: Input PDF file does not exist or path is invalid: {input_pdf_path}")
         print("Please check for problematic characters in the path or use the full absolute path.")
         sys.exit(1)
 
-
-    # --- Step A: Automatic Hash Determination, Extraction and Sorting ---
+    # Automatic Hash Determination, extraction and sorting
     bookmarks, unique_key = extract_bookmarks(xml_path, temp_pdf_path_obj)
     if bookmarks is None:
         sys.exit(1)
 
-    # --- Step B: ROBUST FILE LOCATION using GLOB ---
+    # File location using GLOB
     pdf_path_obj = find_pdf_by_hash(temp_pdf_path_obj.parent, unique_key)
-    
+
     if pdf_path_obj is None:
         print(f"ERROR: File exists, but could not be located by hash search in directory {temp_pdf_path_obj.parent}")
         print("Please manually rename the PDF to use only standard ASCII characters (e.g., replace non-standard quotes with standard ones) and try again.")
         sys.exit(1)
-        
+
     pdf_path_str = pdf_path_obj.as_posix()
 
-    # --- Step C: Define Output Paths (File-Length Safe) ---
+    # Define Output Paths (File-Length Safe)
     pdf_directory = pdf_path_obj.parent
-    
+
     json_filename = f"{unique_key}_temp.json"
     json_path = pdf_directory / json_filename
-    
+
     output_filename = pdf_path_obj.stem + "_bookmarked.pdf"
     output_path = pdf_directory / output_filename
-    
-    # --- Step D: Save Intermediate JSON (Temporary) ---
+
+    # Save Intermediate temp JSON
     try:
         with open(json_path, 'w') as f:
             json.dump(bookmarks, f, indent=2)
@@ -238,10 +226,10 @@ def main():
         print(f"CRITICAL ERROR WRITING JSON: {e}") 
         sys.exit(1)
 
-    # --- Step E: Injection (Prints SUCCESS) ---
+    # Injection
     inject_bookmarks_pypdf(pdf_path_str, bookmarks, output_path)
 
-    # --- Step F: Cleanup ---
+    # Cleanup
     try:
         os.remove(json_path)
     except Exception as e:
@@ -249,3 +237,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
