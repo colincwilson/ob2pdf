@@ -7,8 +7,11 @@ import unicodedata
 from pypdf import PdfReader, PdfWriter
 from pathlib import Path
 
+# Suffix appended to filename after first time processing.
+save_suffix = ['_cw', '_bookmarked'][0]
 
 # Utility functions
+
 
 def sanitize_title(title):
     """
@@ -17,12 +20,15 @@ def sanitize_title(title):
     """
     if title is None:
         return ""
-    title = unicodedata.normalize('NFKD', title).encode('ascii', 'ignore').decode('utf-8')
+    title = unicodedata.normalize('NFKD',
+                                  title).encode('ascii',
+                                                'ignore').decode('utf-8')
     title = re.sub(r'[\x00-\x1F\x7F-\x9F]', '', title)
     title = title.replace('"', '').replace('\\', '')
     title = title.replace('–', '-').replace('—', '--')
     title = re.sub(r'\s+', ' ', title).strip()
     return title
+
 
 def find_pdf_by_hash(start_dir, unique_key):
     """
@@ -33,7 +39,9 @@ def find_pdf_by_hash(start_dir, unique_key):
     pdf_files = list(Path(start_dir).glob(search_pattern))
     if not pdf_files:
         return None
-    return pdf_files[0].resolve()
+    ret = pdf_files[0].resolve()
+    return ret
+
 
 def extract_bookmarks(xml_path, pdf_path_obj):
     """
@@ -54,22 +62,26 @@ def extract_bookmarks(xml_path, pdf_path_obj):
 
     # Automatic hash determination
     pdf_filename = pdf_path_obj.name
-    match_key_search = re.search(r'-- ([0-9a-f]{32}) --', pdf_filename)
-    if not match_key_search:
-         print("Error: Could not extract the 32-character hash from the PDF filename.")
-         return None, None
-
-    unique_key = match_key_search.group(1)
+    try:
+        match_key_search = re.search(r'-- ([0-9a-f]{32}) --', pdf_filename)
+        if not match_key_search:
+            print(
+                "Warning: Could not extract the 32-character hash from the PDF filename."
+            )
+            #return None, None
+        unique_key = match_key_search.group(1)
+    except:
+        unique_key = pdf_filename  # [CW] Fallback to pdf filename if no hash.
 
     cpdf_bookmarks = []
-    page_regex = re.compile(r'#(\d+)') 
+    page_regex = re.compile(r'#(\d+)')
 
     for bookmark in root.iter('bookmark'):
         href = bookmark.get('href')
 
         if href and unique_key in href:
             title_tag = bookmark.find('title')
- 
+
             if title_tag is None:
                 title_tag = bookmark.find('xbel:title', NAMESPACES)
 
@@ -80,7 +92,7 @@ def extract_bookmarks(xml_path, pdf_path_obj):
 
             if match:
                 okular_page = int(match.group(1))
-                cpdf_page = okular_page + 1 
+                cpdf_page = okular_page + 1
 
                 cpdf_bookmarks.append({
                     "Title": sanitize_title(title_tag.text),
@@ -89,7 +101,9 @@ def extract_bookmarks(xml_path, pdf_path_obj):
                 })
 
     if not cpdf_bookmarks:
-        print(f"Error: Found no bookmarks for the PDF using key '{unique_key}' in bookmarks.xml.")
+        print(
+            f"Error: Found no bookmarks for the PDF using key '{unique_key}' in bookmarks.xml."
+        )
         return None, None
 
     cpdf_bookmarks.sort(key=lambda x: x['Page'])
@@ -109,22 +123,23 @@ def inject_bookmarks_pypdf(pdf_path_str, bookmarks, output_path):
             writer.add_page(page)
 
         for mark in bookmarks:
-            page_index = mark['Page'] - 1 
+            page_index = mark['Page'] - 1
 
-            writer.add_outline_item(
-                mark['Title'], 
-                page_index
-            )
+            writer.add_outline_item(mark['Title'], page_index)
 
         with open(output_path, 'wb') as f:
             writer.write(f)
 
         num_bookmarks = len(bookmarks)
-        print(f"\nSuccess! {num_bookmarks} bookmarks injected into: {output_path.name}\n")
+        print(
+            f"\nSuccess! {num_bookmarks} bookmarks injected into: {output_path.name}\n"
+        )
 
     except Exception as e:
         print(f"Error during PDF processing with pypdf: {e}")
-        print("\nHint: If the PDF is heavily structured or encrypted, try cleaning it first with Ghostscript (gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=clean_input.pdf INPUT.pdf)")
+        print(
+            "\nHint: If the PDF is heavily structured or encrypted, try cleaning it first with Ghostscript (gs -dBATCH -dNOPAUSE -q -sDEVICE=pdfwrite -sOutputFile=clean_input.pdf INPUT.pdf)"
+        )
         sys.exit(1)
 
 
@@ -134,17 +149,16 @@ def find_xml_path_auto(pdf_path_obj):
     """
     xml_filename = 'bookmarks.xml'
     # Default Okular (Flatpak) location
-    default_okular_path = Path.home() / f'.var/app/org.kde.okular/data/okular/{xml_filename}'
+    default_okular_path = Path.home(
+    ) / f'.var/app/org.kde.okular/data/okular/{xml_filename}'
     # Current Working Directory (CWD)
     cwd_path = Path.cwd() / xml_filename
     # PDF's Directory
     pdf_dir_path = pdf_path_obj.parent / xml_filename
 
-    search_paths = [
-        ("Default Okular Path", default_okular_path),
-        ("Current Working Directory", cwd_path),
-        ("PDF's Directory", pdf_dir_path)
-    ]
+    search_paths = [("Default Okular Path", default_okular_path),
+                    ("Current Working Directory", cwd_path),
+                    ("PDF's Directory", pdf_dir_path)]
 
     for label, path in search_paths:
         if path.exists():
@@ -154,7 +168,7 @@ def find_xml_path_auto(pdf_path_obj):
     print("\nBookmarks file was not found automatically.")
     print("Checked locations:")
     for label, path in search_paths:
-         print(f"  - {label}: {path.as_posix()}")
+        print(f"  - {label}: {path.as_posix()}")
 
     return None
 
@@ -163,7 +177,9 @@ def main():
     if len(sys.argv) < 2 or len(sys.argv) > 3:
         print("\nERROR: Invalid number of arguments.")
         print("Auto Mode: python3 ob2pdf.py <pdf_file_path>")
-        print("Manual Mode: python3 ob2pdf.py <pdf_file_path> <bookmarks_xml_path>")
+        print(
+            "Manual Mode: python3 ob2pdf.py <pdf_file_path> <bookmarks_xml_path>"
+        )
         sys.exit(1)
 
     input_pdf_path = sys.argv[1]
@@ -171,7 +187,9 @@ def main():
     try:
         temp_pdf_path_obj = Path(input_pdf_path).resolve()
     except Exception:
-        print(f"ERROR: Could not process the input PDF path string: {input_pdf_path}")
+        print(
+            f"ERROR: Could not process the input PDF path string: {input_pdf_path}"
+        )
         sys.exit(1)
 
     # Check XML Path
@@ -183,29 +201,47 @@ def main():
         xml_path = find_xml_path_auto(temp_pdf_path_obj)
 
         if xml_path is None:
-            print("\nERROR: Bookmarks file (bookmarks.xml) was not found in any standard location.")
-            print("Please run the script in Manual Mode and specify the path to your bookmarks file:")
-            print(f"Example: python3 ob2pdf.py \"{input_pdf_path}\" /path/to/your/bookmarks.xml")
+            print(
+                "\nERROR: Bookmarks file (bookmarks.xml) was not found in any standard location."
+            )
+            print(
+                "Please run the script in Manual Mode and specify the path to your bookmarks file:"
+            )
+            print(
+                f"Example: python3 ob2pdf.py \"{input_pdf_path}\" /path/to/your/bookmarks.xml"
+            )
             sys.exit(1)
 
     # Check if the PDF exists
     if not temp_pdf_path_obj.exists():
-        print(f"Error: Input PDF file does not exist or path is invalid: {input_pdf_path}")
-        print("Please check for problematic characters in the path or use the full absolute path.")
+        print(
+            f"Error: Input PDF file does not exist or path is invalid: {input_pdf_path}"
+        )
+        print(
+            "Please check for problematic characters in the path or use the full absolute path."
+        )
         sys.exit(1)
 
     # Automatic Hash Determination, extraction and sorting
     bookmarks, unique_key = extract_bookmarks(xml_path, temp_pdf_path_obj)
     if bookmarks is None:
         sys.exit(1)
+    # print(bookmarks)  # debug: show extracted bookmarks
 
     # File location using GLOB
-    pdf_path_obj = find_pdf_by_hash(temp_pdf_path_obj.parent, unique_key)
+    try:
+        pdf_path_obj = find_pdf_by_hash(temp_pdf_path_obj.parent, unique_key)
 
-    if pdf_path_obj is None:
-        print(f"ERROR: File exists, but could not be located by hash search in directory {temp_pdf_path_obj.parent}")
-        print("Please manually rename the PDF to use only standard ASCII characters (e.g., replace non-standard quotes with standard ones) and try again.")
-        sys.exit(1)
+        if pdf_path_obj is None:
+            print(
+                f"Warning: File exists, but could not be located by hash search in directory {temp_pdf_path_obj.parent}"
+            )
+            print(
+                "Please manually rename the PDF to use only standard ASCII characters (e.g., replace non-standard quotes with standard ones) and try again."
+            )
+            sys.exit(1)
+    except:
+        pdf_path_obj = temp_pdf_path_obj  # [CW] Fallback to pdf filename.
 
     pdf_path_str = pdf_path_obj.as_posix()
 
@@ -215,7 +251,12 @@ def main():
     json_filename = f"{unique_key}_temp.json"
     json_path = pdf_directory / json_filename
 
-    output_filename = pdf_path_obj.stem + "_bookmarked.pdf"
+    # [CW] Add save suffix to output filename if not already present.
+    output_filename = pdf_path_obj.stem
+    if output_filename.endswith(save_suffix):
+        output_filename = output_filename + ".pdf"
+    else:
+        output_filename = output_filename + save_suffix + ".pdf"
     output_path = pdf_directory / output_filename
 
     # Save Intermediate temp JSON
@@ -223,7 +264,7 @@ def main():
         with open(json_path, 'w') as f:
             json.dump(bookmarks, f, indent=2)
     except Exception as e:
-        print(f"CRITICAL ERROR WRITING JSON: {e}") 
+        print(f"CRITICAL ERROR WRITING JSON: {e}")
         sys.exit(1)
 
     # Injection
@@ -235,6 +276,6 @@ def main():
     except Exception as e:
         print(f"Warning: Could not delete temporary JSON file: {e}")
 
+
 if __name__ == '__main__':
     main()
-
